@@ -1,7 +1,8 @@
-import cPickle as pickle
+# pylint:disable=[all]
+import _pickle as pickle
 import caption_generator
 import numpy as np
-from keras.preprocessing import sequence
+import tensorflow as tf
 import nltk
 
 cg = caption_generator.CaptionGenerator()
@@ -35,7 +36,7 @@ def generate_captions(model, image, beam_size):
 	while(len(captions[0][0]) < cg.max_cap_len):
 		temp_captions = []
 		for caption in captions:
-			partial_caption = sequence.pad_sequences([caption[0]], maxlen=cg.max_cap_len, padding='post')
+			partial_caption = tf.keras.preprocessing.sequence.pad_sequences([caption[0]], maxlen=cg.max_cap_len, padding='post')
 			next_words_pred = model.predict([np.asarray([image]), np.asarray(partial_caption)])[0]
 			next_words = np.argsort(next_words_pred)[-beam_size:]
 			for word in next_words:
@@ -65,7 +66,7 @@ def bleu_score(hypotheses, references):
 def test_model_on_images(weight, img_dir, beam_size = 3):
 	imgs = []
 	captions = {}
-	with open(img_dir, 'rb') as f_images:
+	with open(img_dir, 'r') as f_images:
 		imgs = f_images.read().strip().split('\n')
 	encoded_images = pickle.load( open( "encoded_images.p", "rb" ) )
 	model = cg.create_model(ret_model = True)
@@ -74,17 +75,17 @@ def test_model_on_images(weight, img_dir, beam_size = 3):
 	f_pred_caption = open('predicted_captions.txt', 'wb')
 
 	for count, img_name in enumerate(imgs):
-		print "Predicting for image: "+str(count)
+		print ("Predicting for image: "+str(count))
 		image = encoded_images[img_name]
 		image_captions = generate_captions(model, image, beam_size)
 		best_caption = process_caption(get_best_caption(image_captions))
 		captions[img_name] = best_caption
-		print img_name+" : "+str(best_caption)
+		print (img_name+" : "+str(best_caption))
 		f_pred_caption.write(img_name+"\t"+str(best_caption))
 		f_pred_caption.flush()
 	f_pred_caption.close()
 
-	f_captions = open('Flickr8k_text/Flickr8k.token.txt', 'rb')
+	f_captions = open('Flickr8k_text/Flickr8k.token.txt', 'r')
 	captions_text = f_captions.read().strip().split('\n')
 	image_captions_pair = {}
 	for row in captions_text:
@@ -111,4 +112,4 @@ if __name__ == '__main__':
 	test_image = '3155451946_c0862c70cb.jpg'
 	test_img_dir = 'Flickr8k_text/Flickr_8k.testImages.txt'
 	#print test_model(weight, test_image)
-	print test_model_on_images(weight, test_img_dir, beam_size=3)
+	print (test_model_on_images(weight, test_img_dir, beam_size=3))

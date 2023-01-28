@@ -1,16 +1,16 @@
-import cPickle as pickle
-from keras.preprocessing import image
+# pylint:disable=[all]
+import _pickle as pickle
+import tensorflow as tf
 from vgg16 import VGG16
 import numpy as np 
-from keras.applications.imagenet_utils import preprocess_input	
 
 counter = 0
 
 def load_image(path):
-    img = image.load_img(path, target_size=(224,224))
-    x = image.img_to_array(img)
+    img = tf.keras.preprocessing.image.load_img(path, target_size=(224,224))
+    x = tf.keras.preprocessing.image.img_to_array(img)
     x = np.expand_dims(x, axis=0)
-    x = preprocess_input(x)
+    x = tf.keras.applications.densenet.preprocess_input(x)
     return np.asarray(x)
 
 def load_encoding_model():
@@ -23,28 +23,28 @@ def get_encoding(model, img):
 	image = load_image('Flicker8k_Dataset/'+str(img))
 	pred = model.predict(image)
 	pred = np.reshape(pred, pred.shape[1])
-	print "Encoding image: "+str(counter)
-	print pred.shape
+	print ("Encoding image: "+str(counter))
+	print (pred.shape)
 	return pred
 
 def prepare_dataset(no_imgs = -1):
-	f_train_images = open('Flickr8k_text/Flickr_8k.trainImages.txt','rb')
+	f_train_images = open('Flickr8k_text/Flickr_8k.trainImages.txt','r')
 	train_imgs = f_train_images.read().strip().split('\n') if no_imgs == -1 else f_train_images.read().strip().split('\n')[:no_imgs]
 	f_train_images.close()
 
-	f_test_images = open('Flickr8k_text/Flickr_8k.testImages.txt','rb')
+	f_test_images = open('Flickr8k_text/Flickr_8k.testImages.txt','r')
 	test_imgs = f_test_images.read().strip().split('\n') if no_imgs == -1 else f_test_images.read().strip().split('\n')[:no_imgs]
 	f_test_images.close()
 
-	f_train_dataset = open('Flickr8k_text/flickr_8k_train_dataset.txt','wb')
+	f_train_dataset = open('Flickr8k_text/flickr_8k_train_dataset.txt','w')
 	f_train_dataset.write("image_id\tcaptions\n")
 
-	f_test_dataset = open('Flickr8k_text/flickr_8k_test_dataset.txt','wb')
+	f_test_dataset = open('Flickr8k_text/flickr_8k_test_dataset.txt','w')
 	f_test_dataset.write("image_id\tcaptions\n")
 
-	f_captions = open('Flickr8k_text/Flickr8k.token.txt', 'rb')
+	f_captions = open('Flickr8k_text/Flickr8k.token.txt', 'r')
 	captions = f_captions.read().strip().split('\n')
-	data = {}
+	data: dict [str,list] = {}
 	for row in captions:
 		row = row.split("\t")
 		row[0] = row[0][:len(row[0])-2]
@@ -82,5 +82,5 @@ def prepare_dataset(no_imgs = -1):
 
 if __name__ == '__main__':
 	c_train, c_test = prepare_dataset()
-	print "Training samples = "+str(c_train)
-	print "Test samples = "+str(c_test)
+	print ("Training samples = "+str(c_train))
+	print ("Test samples = "+str(c_test))
