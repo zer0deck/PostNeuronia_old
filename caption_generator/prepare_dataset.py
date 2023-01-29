@@ -1,86 +1,162 @@
-# pylint:disable=[all]
-import _pickle as pickle
+# pylint:disable = [all]
+
 import tensorflow as tf
-from vgg16 import VGG16
-import numpy as np 
+import collections
+import random
+import numpy as np
+import json
+from tqdm import tqdm
 
-counter = 0
+# HYPERPARAMS
 
-def load_image(path):
-    img = tf.keras.preprocessing.image.load_img(path, target_size=(224,224))
-    x = tf.keras.preprocessing.image.img_to_array(img)
-    x = np.expand_dims(x, axis=0)
-    x = tf.keras.applications.densenet.preprocess_input(x)
-    return np.asarray(x)
+FP = 'E:/Projects/PostNeuronia/'
+MAX_LENGTH = 50
+VOCAB_SIZE = 5000
+BATCH_SIZE = 64
+BUFFER_SIZE = 1000
+EXTRACT_FEATURES = True
+embedding_dim = 256
+units = 512
+features_shape = 2048
+attention_features_shape = 64
+SAVE = False
 
-def load_encoding_model():
-	model = VGG16(weights='imagenet', include_top=True, input_shape = (224, 224, 3))
-	return model
+####################################
 
-def get_encoding(model, img):
-	global counter
-	counter += 1
-	image = load_image('Flicker8k_Dataset/'+str(img))
-	pred = model.predict(image)
-	pred = np.reshape(pred, pred.shape[1])
-	print ("Encoding image: "+str(counter))
-	print (pred.shape)
-	return pred
+def load_image(image_path, size=299):
+    img = tf.io.read_file(image_path)
+    img = tf.io.decode_jpeg(img, channels=3)
+    img = tf.keras.layers.Resizing(size, size)(img)
+    img = tf.keras.applications.inception_v3.preprocess_input(img)
+    return img, image_path
 
-def prepare_dataset(no_imgs = -1):
-	f_train_images = open('Flickr8k_text/Flickr_8k.trainImages.txt','r')
-	train_imgs = f_train_images.read().strip().split('\n') if no_imgs == -1 else f_train_images.read().strip().split('\n')[:no_imgs]
-	f_train_images.close()
+def load_feature_extractor() -> tf.keras.Model:
+	image_model = tf.keras.applications.InceptionV3(include_top=False,
+                                                weights='imagenet')
+	new_input = image_model.input
+	hidden_layer = image_model.layers[-1].output
 
-	f_test_images = open('Flickr8k_text/Flickr_8k.testImages.txt','r')
-	test_imgs = f_test_images.read().strip().split('\n') if no_imgs == -1 else f_test_images.read().strip().split('\n')[:no_imgs]
-	f_test_images.close()
+	return tf.keras.Model(new_input, hidden_layer)
 
-	f_train_dataset = open('Flickr8k_text/flickr_8k_train_dataset.txt','w')
-	f_train_dataset.write("image_id\tcaptions\n")
+def standardize(inputs):
+	inputs = tf.strings.lower(inputs)
+	return tf.strings.regex_replace(inputs, r"!\"#$%&\(\)\*\+.,-/:;=?@\[\\\]^_`{|}~", "")
 
-	f_test_dataset = open('Flickr8k_text/flickr_8k_test_dataset.txt','w')
-	f_test_dataset.write("image_id\tcaptions\n")
+def save_image_features(encode_train:list, image_features_extract_model: tf.keras.Model, batch_size=32) -> None:
 
-	f_captions = open('Flickr8k_text/Flickr8k.token.txt', 'r')
-	captions = f_captions.read().strip().split('\n')
-	data: dict [str,list] = {}
-	for row in captions:
-		row = row.split("\t")
-		row[0] = row[0][:len(row[0])-2]
-		try:
-			data[row[0]].append(row[1])
-		except:
-			data[row[0]] = [row[1]]
-	f_captions.close()
+	image_dataset = tf.data.Dataset.from_tensor_slices(encode_train)
+	image_dataset = image_dataset.map(load_image, num_parallel_calls=tf.data.AUTOTUNE).batch(batch_size)
 
-	encoded_images = {}
-	encoding_model = load_encoding_model()
+	for img, path in tqdm(image_dataset):
+		batch_features = image_features_extract_model(img)
+		batch_features = tf.reshape(batch_features,
+									(batch_features.shape[0], -1, batch_features.shape[3])
+								)
 
-	c_train = 0
-	for img in train_imgs:
-		encoded_images[img] = get_encoding(encoding_model, img)
-		for capt in data[img]:
-			caption = "<start> "+capt+" <end>"
-			f_train_dataset.write(img+"\t"+caption+"\n")
-			f_train_dataset.flush()
-			c_train += 1
-	f_train_dataset.close()
+		for bf, p in zip(batch_features, path):
+			path_of_feature = p.numpy().decode("utf-8")
+			np.save(path_of_feature, bf.numpy())
 
-	c_test = 0
-	for img in test_imgs:
-		encoded_images[img] = get_encoding(encoding_model, img)
-		for capt in data[img]:
-			caption = "<start> "+capt+" <end>"
-			f_test_dataset.write(img+"\t"+caption+"\n")
-			f_test_dataset.flush()
-			c_test += 1
-	f_test_dataset.close()
-	with open( "encoded_images.p", "wb" ) as pickle_f:
-		pickle.dump( encoded_images, pickle_f )  
-	return [c_train, c_test]
+def prepare_text_features(train_captions:list):
+	caption_dataset = tf.data.Dataset.from_tensor_slices(train_captions)
 
-if __name__ == '__main__':
-	c_train, c_test = prepare_dataset()
-	print ("Training samples = "+str(c_train))
-	print ("Test samples = "+str(c_test))
+	tokenizer = tf.keras.layers.TextVectorization(
+		max_tokens=VOCAB_SIZE,
+		standardize=standardize,
+		output_sequence_length=MAX_LENGTH
+		)
+	tokenizer.adapt(caption_dataset)
+
+	cap_vector = caption_dataset.map(lambda x: tokenizer(x))
+	return cap_vector, tokenizer
+
+def map_func(img_name, cap):
+	img_tensor = np.load(img_name.decode('utf-8')+'.npy')
+	return img_tensor, cap
+
+def preprocess():
+	# print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+	annotation_file = f'{FP}data/annotations/captions_train2014.json'
+	PATH = f'{FP}data/train/'
+
+	with open(annotation_file, 'r') as f:
+		annotations = json.load(f)
+
+	# Group all captions together having the same image ID.
+	image_path_to_caption = collections.defaultdict(list)
+	for val in annotations['annotations']:
+		caption = f"<start> {val['caption']} <end>"
+		image_path = PATH + 'COCO_train2014_' + '%012d.jpg' % (val['image_id'])
+		image_path_to_caption[image_path].append(caption)
+
+	image_paths = list(image_path_to_caption.keys())
+	random.shuffle(image_paths)
+
+
+	train_image_paths = image_paths[:6000]
+	print(f'Загружено: {len(train_image_paths)} объектов')
+
+	train_captions = []
+	img_name_vector = []
+
+	for image_path in train_image_paths:
+		caption_list = image_path_to_caption[image_path]
+		train_captions.extend(caption_list)
+		img_name_vector.extend([image_path] * len(caption_list))
+
+	encode_train = sorted(set(img_name_vector))
+	print(f'Уникальных изображений: {len(encode_train)}')
+
+	image_features_extract_model = load_feature_extractor()
+	print(f'Запущена модель извлечения эмбендингов: {image_features_extract_model}')
+
+	if EXTRACT_FEATURES:
+		print('Обработка свойств изображений и сохранение...')
+		save_image_features(encode_train, image_features_extract_model)
+
+	print('Обработка текстов описания...')
+	cap_vector, tokenizer = prepare_text_features(train_captions=train_captions)
+
+	img_to_cap_vector = collections.defaultdict(list)
+	for img, cap in zip(img_name_vector, cap_vector):
+		img_to_cap_vector[img].append(cap)
+	
+	img_name_train = []
+	cap_train = []
+
+	img_keys = list(img_to_cap_vector.keys())
+	random.shuffle(img_keys)
+
+	img_name_train_keys = img_keys
+
+	for imgt in tqdm(img_name_train_keys):
+		capt_len = len(img_to_cap_vector[imgt])
+		img_name_train.extend([imgt] * capt_len)
+		cap_train.extend(img_to_cap_vector[imgt])
+
+	num_steps = len(img_name_train) // BATCH_SIZE
+
+	print('Обработка датасета...')
+	dataset = tf.data.Dataset.from_tensor_slices((img_name_train, cap_train))
+
+	dataset = dataset.map(
+		lambda item1, item2: tf.numpy_function(
+			map_func, [item1, item2], [tf.float32, tf.int64]
+			),
+			num_parallel_calls=tf.data.AUTOTUNE
+		)
+
+	print('Обработка датасета...')
+	dataset = dataset.shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
+	dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+	if SAVE:
+		print('Сохранение датасета...')
+		dataset.save(
+			path=f'{FP}data/datasets', 
+			compression='GZIP', 
+			shard_func=None, 
+			checkpoint_args=None
+		)
+		print('Dataset saved successfully')
+	
+	return dataset, tokenizer, image_features_extract_model, num_steps
