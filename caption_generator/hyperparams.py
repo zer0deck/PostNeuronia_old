@@ -4,7 +4,7 @@ The file that stores all the settings for the model.
 
 __all__ = [
   "FP", "MAX_LENGTH", 'VOCAB_SIZE', 'BATCH_SIZE', 'BUFFER_SIZE', 'EXTRACT_FEATURES', 'LOAD', 'SAVE',
-  'EMBEDDING_DIM', 'UNITS', 'FEATURES_SHAPE', 'ATTENTION_FEATURES_SHAPE'
+  'EMBEDDING_DIM', 'UNITS', 'FEATURES_SHAPE', 'ATTENTION_FEATURES_SHAPE', 'TRAIN'
 ]
 
 ########################################
@@ -17,8 +17,9 @@ VOCAB_SIZE = 5000
 BATCH_SIZE = 64
 BUFFER_SIZE = 1000
 EXTRACT_FEATURES = True
-LOAD = False
+LOAD = True
 SAVE = False
+TRAIN = False
 
 ########################################
 # MODEL

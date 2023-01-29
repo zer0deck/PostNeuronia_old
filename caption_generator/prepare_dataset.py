@@ -3,6 +3,10 @@ The file that stores all of the preprocessing process)))
 """
 # pylint:disable = ['import-error', 'unnecessary-lambda', 'unspecified-encoding']
 
+__all__ = [
+    "preprocess"
+]
+
 ########################################
 # RUN
 ########################################
@@ -22,7 +26,8 @@ from hyperparams import (
     EXTRACT_FEATURES,
     BATCH_SIZE,
     BUFFER_SIZE,
-    SAVE
+    SAVE,
+    TRAIN
 )
 
 ########################################
@@ -117,7 +122,7 @@ def prepare_text_features(train_captions:list):
 # RUN
 ########################################
 
-def preprocess():
+def preprocess() -> tuple[tf.data.Dataset, tf.keras.layers.TextVectorization, int]:
     """
 	executable
 
@@ -125,13 +130,21 @@ def preprocess():
 	:rtype: list[tf.data.Dataset, tf.keras.layers.TextVectorization, tf.keras.Model, int]
 	"""
     if LOAD:
-        print('Загрузка сохраненного датасета...')
-        dataset = tf.data.Dataset.load(path=f'{FP}data/datasets', compression='GZIP')
+        if TRAIN:
+            print('Загрузка сохраненного датасета...')
+            dataset = tf.data.Dataset.load(path=f'{FP}data/datasets', compression='GZIP')
         print('Загрузка параметров...')
+        from_disk = pickle.load(open(f'{FP}data/datasets/tokenizer.pkl', "rb"))
+        tokenizer = tf.keras.layers.TextVectorization.from_config(from_disk['config'])
+        tokenizer.adapt(tf.data.Dataset.from_tensor_slices(["xyz"]))
+        tokenizer.set_weights(from_disk['weights'])
         with open(f'{FP}data/datasets/info.pkl', 'rb') as inp:
-            info_data = pickle.load(inp)
+            num_steps = pickle.load(inp)
         print('Успешно загружено')
-        return dataset, info_data[0], info_data[1], info_data[2]
+        if TRAIN:
+            return dataset, tokenizer, num_steps
+        else:
+            return tokenizer, num_steps
 
     # print(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     annotation_file = f'{FP}data/annotations/captions.json'
@@ -207,9 +220,11 @@ def preprocess():
     dataset = dataset.shuffle(BUFFER_SIZE).batch(BATCH_SIZE)
     dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
     if SAVE:
-        print('Сохранение свойств...')
+        print('Сохранение токенизатора...')
+        pickle.dump({'config': tokenizer.get_config(),
+             'weights': tokenizer.get_weights()}, open(f'{FP}data/datasets/tokenizer.pkl', "wb"))
         with open(f'{FP}data/datasets/info.pkl', 'wb') as outp:  # Overwrites any existing file.
-            pickle.dump([tokenizer, image_features_extract_model, num_steps],
+            pickle.dump(num_steps,
 				outp,
 				pickle.HIGHEST_PROTOCOL
 			)
@@ -224,4 +239,4 @@ def preprocess():
 
     print('Подготовка данных заверешена')
 
-    return dataset, tokenizer, image_features_extract_model, num_steps
+    return dataset, tokenizer, num_steps

@@ -12,12 +12,13 @@ __all__ = [
 # IMPORTS
 ########################################
 
+import os
 import time
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
-from PIL import Image
-from prepare_dataset import load_image
+from PIL import Image, ImageFont, ImageDraw
+from prepare_dataset import load_image, load_feature_extractor, preprocess
 from hyperparams import FP, MAX_LENGTH, EMBEDDING_DIM, UNITS, ATTENTION_FEATURES_SHAPE
 
 ########################################
@@ -123,15 +124,14 @@ class PostNeuronia():
     # pylint:enable=['line-too-long']
     def __init__(self,
             tokenizer: tf.keras.layers.TextVectorization,
-            image_features_extract_model: tf.keras.Model,
             num_steps: int) -> None:
         self.encoder = CNN_Encoder(EMBEDDING_DIM)
         self.decoder = RNN_Decoder(EMBEDDING_DIM, UNITS, tokenizer.vocabulary_size())
         self.optimizer = tf.keras.optimizers.Adam()
-        self.image_features_extract_model = image_features_extract_model
+        self.image_features_extract_model: tf.keras.Model = load_feature_extractor()
         self.loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
             from_logits=True, reduction='none')
-        checkpoint_path = f"{FP}models/checkpoints/train"
+        checkpoint_path = f"{FP}models"
         self.ckpt = tf.train.Checkpoint(encoder=self.encoder,
                                 decoder=self.decoder,
                                 optimizer=self.optimizer)
@@ -309,3 +309,26 @@ class PostNeuronia():
         self.debug_plot_attention(image_path, result, attention_plot)
         # opening the image
         Image.open(image_path)
+
+    async def generate(self, image_id):
+        result, _ = self.predict(f'{FP}generator/temp_loaded/{image_id}')
+        img = Image.open(f'{FP}generator/temp_loaded/{image_id}')
+        img_w, img_h = img.size
+        background = Image.new('RGB', (int(img_w*1.2), int(img_h*1.4)), (0, 0, 0))
+        bg_w, bg_h = background.size
+        offset = ((bg_w - img_w) // 2, (bg_w - img_w) // 2)
+        font = ImageFont.truetype(f'{FP}generator/fonts/TNR.ttf', int(img_h*0.05))
+        background.paste(img, offset)
+        img_d = ImageDraw.Draw(background)
+        img_d.text(
+            xy=(
+                bg_w //2,
+                (bg_h+(bg_w-img_w)//2+img_h)//2
+            ),
+            text=' '.join(result),
+            font=font,
+            fill=(225,225,225),
+            anchor='ms'
+        )
+        background.save(f'{FP}generator/temp_generated/{image_id}')
+        os.remove(f"{FP}generator/temp_loaded/{image_id}")

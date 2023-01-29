@@ -5,19 +5,17 @@
 ########################################
 
 import logging
+import os
 from network import generate_image
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     MessageHandler,
     filters,
-    Application,
-    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
     ApplicationBuilder
 )
-from typing import Dict
 from messages import (
     MESSAGE_1,
     MESSAGE_2,
@@ -47,6 +45,10 @@ from marks import (
     MARK_7,
     MARK_8
 )
+
+import sys
+sys.path.insert(1, os.path.dirname(os.path.dirname(os.path.abspath(__file__))) +'\\caption_generator')
+from caption_generator import FP, PostNeuronia, preprocess
 
 ########################################
 # FLAGS
@@ -355,17 +357,20 @@ async def generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         photo_file = await update.message.photo[-1].get_file()
         context.user_data['generate_image_id'] = str(id(photo_file)) + '.jpg'
-        await photo_file.download_to_drive(f"uploaded/{context.user_data['generate_image_id']}")
-        await generate_image(context.user_data['generate_image_id'])
+        await photo_file.download_to_drive(f"{FP}generator/temp_loaded/{context.user_data['generate_image_id']}")
+        await model.generate(context.user_data['generate_image_id'])
+        # await generate_image(context.user_data['generate_image_id'])
         await context.bot.send_photo(
             chat_id=chat_id,
-            photo = open(f"generated/{context.user_data['generate_image_id']}", "rb")
-        )        
+            photo = open(f"{FP}generator/temp_generated/{context.user_data['generate_image_id']}", "rb")
+        )
+        os.remove(f"{FP}generator/temp_generated/{context.user_data['generate_image_id']}")
+        # внедрить систему оценок
         await update.message.reply_text(
             text='Вот твой мем. <b>Хочешь сделаю еще?</b>', 
             reply_markup=agree_menu_markup,
             parse_mode='HTML'
-        )        
+        )
 
         return GENERATE_MORE
 
@@ -413,6 +418,9 @@ async def thank_for_generating(update: Update, context: ContextTypes.DEFAULT_TYP
 
 if __name__ == '__main__':
     # token
+    tokenizer, num_steps = preprocess()
+    model = PostNeuronia(tokenizer, num_steps)
+
     application = ApplicationBuilder().token('TOKEN').build()
 
     job_queue = application.job_queue
